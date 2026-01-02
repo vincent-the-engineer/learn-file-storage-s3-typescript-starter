@@ -1,3 +1,5 @@
+import path from "path";
+
 import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
 import { getVideo, updateVideo } from "../db/videos";
@@ -45,14 +47,20 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new UserForbiddenError("Forbidden");
   }
 
+  const mediaType = file.type.toLowerCase();
+  if (mediaType !== "image/jpeg" && mediaType !== "image/png") {
+    throw new BadRequestError("Thumbnail is not an accepted media type");
+  }
+
   console.log("uploading thumbnail for video", videoId, "by user", userID);
 
-  const mediaType = file.type;
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const base64String = buffer.toString("base64");
+  const fileExt = mediaType.split("/").pop();
+  const filename = `${videoId}.${fileExt}`;
+  const filePath = path.join(cfg.assetsRoot, filename);
 
-  const thumbnailURL = `data:${mediaType};base64,${base64String}`;
+  await Bun.write(filePath, file);
+
+  const thumbnailURL = `http://localhost:${cfg.port}/assets/${filename}`;
   video.thumbnailURL = thumbnailURL;
 
   updateVideo(cfg.db, video);
