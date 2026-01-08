@@ -4,8 +4,10 @@ import { unlink } from 'node:fs/promises';
 import path from "path";
 
 import { respondWithJSON } from "./json";
+import {dbVideoToSignedVideo } from "./video-meta";
 import { getBearerToken, validateJWT } from "../auth";
 import { type ApiConfig } from "../config";
+import { uploadVideoToS3, generatePresignedURL } from "../s3";
 import { getVideo, updateVideo } from "../db/videos";
 
 
@@ -39,7 +41,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const token = getBearerToken(req.headers);
   const userID = validateJWT(token, cfg.jwtSecret);
 
-  const video = getVideo(cfg.db, videoId);
+  let video = getVideo(cfg.db, videoId);
   if (!video) {
     throw new NotFoundError("Couldn't find video");
   }
@@ -59,25 +61,33 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await Bun.write(filePath, file);
 
   const aspect = await getVideoAspectRatio(filePath);
-
-  const fileExt = mediaType.split("/").pop();
-  const key = `${aspect}/${randomBytes(32).toString("base64url")}.${fileExt}`;
-  const s3file: S3File = cfg.s3Client.file(key, {
-    type: mediaType
-  });
-
   const processedFilePath = await processVideoForFastStart(filePath);
   await unlink(filePath);
 
-  await s3file.write(Bun.file(processedFilePath));
+  const fileExt = mediaType.split("/").pop();
+  const key = `${aspect}/${randomBytes(32).toString("base64url")}.${fileExt}`;
+
+  await uploadVideoToS3(cfg, key, processedFilePath, mediaType);
   await unlink(processedFilePath);
 
-  const videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
+  const videoURL = `${key}`;
   video.videoURL = videoURL;
 
   updateVideo(cfg.db, video);
 
+  video = await dbVideoToSignedVideo(cfg, video);
+
   return respondWithJSON(200, video);
+}
+
+export async function dbVideoToSignedVideo(cfg: APIConfig, video: Video) {
+  if (!video.videoURL) {
+    return video;
+  }
+
+  video.videoURL = await generatePresignedURL(cfg, video.videoURL, 3600);
+
+  return video;
 }
 
 async function getVideoAspectRatio(filePath: string) {
