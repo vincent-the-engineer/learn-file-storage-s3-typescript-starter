@@ -7,7 +7,7 @@ import { respondWithJSON } from "./json";
 import {dbVideoToSignedVideo } from "./video-meta";
 import { getBearerToken, validateJWT } from "../auth";
 import { type ApiConfig } from "../config";
-import { uploadVideoToS3, generatePresignedURL } from "../s3";
+import { uploadVideoToS3 } from "../s3";
 import { getVideo, updateVideo } from "../db/videos";
 
 
@@ -41,7 +41,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const token = getBearerToken(req.headers);
   const userID = validateJWT(token, cfg.jwtSecret);
 
-  let video = getVideo(cfg.db, videoId);
+  const video = getVideo(cfg.db, videoId);
   if (!video) {
     throw new NotFoundError("Couldn't find video");
   }
@@ -70,24 +70,12 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await uploadVideoToS3(cfg, key, processedFilePath, mediaType);
   await unlink(processedFilePath);
 
-  const videoURL = `${key}`;
+  const videoURL = `https://${cfg.s3CfDistribution}/${key}`;
   video.videoURL = videoURL;
 
   updateVideo(cfg.db, video);
 
-  video = await dbVideoToSignedVideo(cfg, video);
-
   return respondWithJSON(200, video);
-}
-
-export async function dbVideoToSignedVideo(cfg: APIConfig, video: Video) {
-  if (!video.videoURL) {
-    return video;
-  }
-
-  video.videoURL = await generatePresignedURL(cfg, video.videoURL, 3600);
-
-  return video;
 }
 
 async function getVideoAspectRatio(filePath: string) {

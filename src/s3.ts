@@ -16,14 +16,3 @@ export async function uploadVideoToS3(
   });
 }
 
-export async function generatePresignedURL(
-  cfg: APIConfig,
-  key: string,
-  expireTime: number,
-) {
-  const url = cfg.s3Client.presign(key, {
-    expiresIn: expireTime,
-  });
-  return url;
-}
-
